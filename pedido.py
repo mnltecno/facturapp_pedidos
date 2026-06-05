@@ -246,10 +246,13 @@ def page_exito():
     st.markdown("<div style='height:.8rem'></div>", unsafe_allow_html=True)
 
     if st.button("🛒 Hacer otro pedido", use_container_width=True):
-        # Limpiar caché de productos para forzar recarga
-        st.session_state.pop("productos_cache", None)
-        st.session_state.pop("familias_cache", None)
-        st.session_state.pop("pedido_confirmado", None)
+        # NO llamar st.rerun() aquí — el click del botón YA dispara un rerun.
+        # Un st.rerun() adicional dentro del handler genera un doble-rerun en
+        # Streamlit Cloud que puede cortar la sesión WebSocket en mobile y
+        # resetear cliente a None, causando el logout inesperado.
+        # Como este botón es el último elemento de la función, no hay nada
+        # más que renderizar: el rerun natural del click se encarga de todo.
+        for k in ["productos_cache", "familias_cache", "pedido_confirmado"]:
+            st.session_state.pop(k, None)
         st.session_state.carrito = {}
         st.session_state.page = "catalogo"
-        st.rerun()
