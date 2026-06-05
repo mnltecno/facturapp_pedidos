@@ -66,31 +66,29 @@ MINIMAL_CSS = """
     margin-bottom: 0.8rem;
 }
 
-/* Sticky footer */
-.sticky-footer {
+/* ── Sticky cart button via CSS anchor+sibling trick ──────────────────── */
+/* El span#cart-btn-anchor (invisible) se renderiza inmediatamente antes
+   del st.button. El selector + apunta al siguiente .element-container,
+   que es exactamente donde Streamlit pone ese button.                   */
+.element-container:has(#cart-btn-anchor) + .element-container {
     position: fixed !important;
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
     z-index: 9999 !important;
-    padding: 0.65rem 1rem !important;
-    border-top: 1px solid rgba(255,107,53,0.2) !important;
+    padding: 0.6rem 0.8rem 0.7rem !important;
     background: rgba(13,13,13,0.96) !important;
     backdrop-filter: blur(10px) !important;
+    border-top: 1px solid #1e1e1e !important;
 }
-.sticky-footer-a {
-    display: block;
-    background: #22c55e;
-    color: #ffffff !important;
-    text-align: center;
-    border-radius: 14px;
-    padding: 0.8rem 1rem;
-    font-weight: 900;
-    font-size: 1.05rem;
-    text-decoration: none !important;
-    box-shadow: 0 4px 18px rgba(34,197,94,.35);
+.element-container:has(#cart-btn-anchor) + .element-container .stButton > button {
+    border-radius: 14px !important;
+    padding: .82rem !important;
+    font-size: 1.05rem !important;
+    font-weight: 900 !important;
+    box-shadow: 0 4px 18px rgba(34,197,94,.4) !important;
+    width: 100% !important;
 }
-.sticky-footer-a:hover { background: #16a34a; text-decoration: none; }
 </style>
 """
 
@@ -130,16 +128,27 @@ def render_hero(n_productos: int, whatsapp_number: str, alias: str):
     )
 
 
-def render_sticky_footer(items: int, total: float):
+def render_sticky_footer(items: int, total: float) -> bool:
+    """
+    Botón fijo al pie de pantalla.
+    Usa un <span> ancla invisible + CSS adjacent-sibling selector para
+    posicionarlo fixed SIN usar <a href>, evitando la recarga de página
+    que borraba el session_state y deslogueaba al usuario.
+    Retorna True si el usuario lo presionó.
+    """
     if items <= 0:
-        return
-    st.markdown(
-        f"""<div class="sticky-footer">
-              <a href="?nav=carrito" target="_self" class="sticky-footer-a">
-                🛒&nbsp; Ver pedido ({items} items) &nbsp;·&nbsp; ${total:,.2f}
-              </a>
-            </div>""",
-        unsafe_allow_html=True,
+        return False
+    # Espacio extra para que el contenido no quede tapado por el botón fijo
+    st.markdown("<div style='height:4.5rem'></div>", unsafe_allow_html=True)
+    # Ancla invisible — el CSS la usa para apuntar al stButton siguiente
+    st.markdown('<span id="cart-btn-anchor" style="display:none"></span>',
+                unsafe_allow_html=True)
+    # El button debe ser el elemento Streamlit INMEDIATAMENTE siguiente al anchor
+    return st.button(
+        f"🛒  Ver pedido ({items} items)  ·  ${total:,.2f}",
+        key="btn_sticky_cart",
+        use_container_width=True,
+        type="primary",
     )
 
 
