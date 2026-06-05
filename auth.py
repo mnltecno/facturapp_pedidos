@@ -1,136 +1,115 @@
 """
-auth.py — Módulo de autenticación para Parada Técnica
-Valida credenciales contra Supabase y escribe en st.session_state
-de forma segura, sin pisar datos ya existentes.
+pedidos_online/auth.py
+Páginas de Login y Registro.
 """
-
+import re
 import streamlit as st
-from supabase import create_client, Client
+from db import get_cliente_by_email, crear_cliente, verificar_password
+from styles import inject_css, header
 
 
-# ---------------------------------------------------------------------------
-# Conexión con Supabase (singleton cacheado a nivel de recurso)
-# ---------------------------------------------------------------------------
-
-@st.cache_resource
-def get_supabase_client() -> Client:
-    """
-    Crea el cliente de Supabase una sola vez por proceso.
-    st.cache_resource NO se borra con reruns, sólo cuando
-    el servidor se reinicia — ideal para conexiones.
-    """
-    url: str = st.secrets["supabase"]["url"]
-    key: str = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-# ---------------------------------------------------------------------------
-# Inicialización de claves de sesión (llamar desde app.py, solo una vez)
-# ---------------------------------------------------------------------------
-
-def init_auth_state() -> None:
-    """
-    Inicializa las claves de autenticación en session_state
-    SOLO si aún no existen. Nunca sobreescribe valores ya seteados.
-    Llamar al inicio de app.py antes de cualquier renderizado.
-    """
-    defaults = {
-        "logged_in": False,
-        "cliente_data": None,
-        "auth_error": "",
-    }
-    for key, default_value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
+def _valid_email(e: str) -> bool:
+    return bool(_EMAIL_RE.match(e.strip()))
 
 
-# ---------------------------------------------------------------------------
-# Lógica de login / logout
-# ---------------------------------------------------------------------------
+def page_login():
+    inject_css()
+    header("FacturApp Móvil", "Pedidos Online")
 
-def login(telefono: str, password: str) -> bool:
-    """
-    Valida el cliente contra la tabla 'clientes' en Supabase.
-    Guarda los datos del cliente en session_state si es válido.
+    st.markdown("### Iniciar sesión")
 
-    Parámetros
-    ----------
-    telefono : str  — número de teléfono ingresado por el usuario
-    password : str  — contraseña / PIN ingresado
+    email    = st.text_input("📧 Email", placeholder="tu@email.com", key="li_email")
+    password = st.text_input("🔒 Contraseña", type="password", key="li_pass")
 
-    Retorna
-    -------
-    bool — True si login exitoso, False si falló
-    """
-    supabase = get_supabase_client()
-    st.session_state["auth_error"] = ""
-
-    try:
-        response = (
-            supabase.table("clientes")
-            .select("*")
-            .eq("telefono", telefono.strip())
-            .eq("password", password.strip())  # ajustá el campo según tu esquema
-            .single()
-            .execute()
-        )
-
-        if response.data:
-            st.session_state["logged_in"] = True
-            st.session_state["cliente_data"] = response.data
-            return True
+    if st.button("Entrar →", use_container_width=True):
+        if not email or not password:
+            st.error("Completá email y contraseña.")
+            return
+        with st.spinner("Verificando..."):
+            cliente = verificar_password(email.strip().lower(), password)
+        if cliente:
+            st.session_state.cliente = cliente
+            st.session_state.page    = "catalogo"
+            st.rerun()
         else:
-            st.session_state["auth_error"] = "Teléfono o contraseña incorrectos."
-            return False
+            st.error("Email o contraseña incorrectos.")
 
-    except Exception as e:
-        st.session_state["auth_error"] = f"Error de conexión: {e}"
-        return False
-
-
-def logout() -> None:
-    """
-    Cierra la sesión limpiando TODAS las claves relevantes,
-    incluido el carrito, de forma explícita y controlada.
-    """
-    keys_to_clear = [
-        "logged_in",
-        "cliente_data",
-        "auth_error",
-        "carrito",
-        "cantidades",
-    ]
-    for key in keys_to_clear:
-        if key in st.session_state:
-            del st.session_state[key]
-
-    # Re-inicializar estado base para que la app no explote
-    init_auth_state()
+    st.divider()
+    st.markdown("¿No tenés cuenta?")
+    if st.button("Registrarme", use_container_width=True):
+        st.session_state.page = "registro"
+        st.rerun()
 
 
-# ---------------------------------------------------------------------------
-# Widget de login (UI)
-# ---------------------------------------------------------------------------
+def page_registro():
+    inject_css()
+    header("Nuevo cliente", "Crear cuenta")
 
-def mostrar_login() -> None:
-    """
-    Renderiza el formulario de login.
-    Usa st.form para que Streamlit no haga rerun en cada keystroke.
-    """
-    st.title("🔧 Parada Técnica")
-    st.subheader("Ingresá para hacer tu pedido")
+    st.markdown("### Crear cuenta")
 
-    with st.form("form_login", clear_on_submit=False):
-        telefono = st.text_input("Teléfono", placeholder="Ej: 1134567890")
-        password = st.text_input("Contraseña / PIN", type="password")
-        submitted = st.form_submit_button("Ingresar")
+    col1, col2 = st.columns(2)
+    with col1:
+        nombre   = st.text_input("Nombre *", key="rg_nom")
+    with col2:
+        apellido = st.text_input("Apellido *", key="rg_ap")
 
-    if submitted:
-        if not telefono or not password:
-            st.warning("Completá todos los campos.")
-        else:
-            with st.spinner("Verificando..."):
-                login(telefono, password)
+    email    = st.text_input("📧 Email *", placeholder="tu@email.com", key="rg_em")
+    telefono = st.text_input("📱 Teléfono", placeholder="Ej: 1134567890", key="rg_tel")
 
-    if st.session_state.get("auth_error"):
-        st.error(st.session_state["auth_error"])
+    st.markdown("**📍 Dirección** *(formato: Calle, Número, Ciudad, Provincia)*")
+    calle     = st.text_input("Calle",     placeholder="San Martín",       key="rg_calle")
+    col3, col4 = st.columns([1, 2])
+    with col3:
+        numero    = st.text_input("Número", placeholder="1234",            key="rg_num")
+    with col4:
+        ciudad    = st.text_input("Ciudad", placeholder="Ramos Mejía",     key="rg_ciu")
+    provincia = st.text_input("Provincia", placeholder="Buenos Aires",     key="rg_prov")
+
+    password  = st.text_input("🔒 Contraseña *", type="password", key="rg_pass")
+    password2 = st.text_input("🔒 Repetir contraseña *", type="password", key="rg_pass2")
+
+    if st.button("Crear cuenta →", use_container_width=True):
+        errores = []
+        if not nombre.strip():    errores.append("Nombre requerido")
+        if not apellido.strip():  errores.append("Apellido requerido")
+        if not email.strip() or not _valid_email(email):
+            errores.append("Email inválido")
+        if not password:          errores.append("Contraseña requerida")
+        if password != password2: errores.append("Las contraseñas no coinciden")
+        if len(password) < 6:     errores.append("Contraseña mínimo 6 caracteres")
+
+        if errores:
+            for e in errores:
+                st.error(e)
+            return
+
+        if get_cliente_by_email(email.strip().lower()):
+            st.error("Ya existe una cuenta con ese email.")
+            return
+
+        partes = [calle.strip(), numero.strip(), ciudad.strip(), provincia.strip()]
+        direccion = ", ".join(p for p in partes if p)
+
+        with st.spinner("Creando cuenta..."):
+            try:
+                cliente = crear_cliente(
+                    apellido=apellido,
+                    nombre=nombre,
+                    telefono=telefono,
+                    email=email.strip().lower(),
+                    direccion=direccion,
+                    password=password,
+                )
+                st.session_state.cliente = cliente
+                st.session_state.page    = "catalogo"
+                st.rerun()
+            except Exception as ex:
+                st.error(f"Error al crear la cuenta: {ex}")
+
+    st.divider()
+    if st.button("← Ya tengo cuenta", use_container_width=True):
+        st.session_state.page = "login"
+        st.rerun()
