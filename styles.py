@@ -373,3 +373,21 @@ def render_hero(n_productos: int, whatsapp_number: str, alias: str,
             </div>""",
         unsafe_allow_html=True,
     )
+
+
+def header(titulo: str, subtitulo: str = ""):
+    """Header simple para las páginas de login y registro."""
+    import streamlit as st
+    st.markdown(
+        f"""<div style="background:#0d0d0d;padding:1.4rem 1.2rem 1rem;
+                        border-bottom:1px solid #222;margin-bottom:1rem">
+              <div style="font-size:1.5rem;font-weight:900;color:#FF6B35;
+                          text-transform:uppercase;letter-spacing:1px">
+                🛒 {titulo}
+              </div>
+              <div style="font-size:.78rem;color:#666;margin-top:3px">
+                {subtitulo}
+              </div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
