@@ -167,7 +167,16 @@ def page_confirmacion():
             st.rerun()
     with col_b:
         if st.button("← Seguir comprando", use_container_width=True):
-            # NO vaciamos el carrito: el usuario quiere agregar más cosas
+            # El carrito (st.session_state.carrito) NO se toca.
+            # PERO: en Streamlit 1.38+ los widgets no renderizados pierden
+            # su clave en session_state. Al estar en "confirmacion", los
+            # number_input del catálogo no se renderizaron, por lo que
+            # q_{tab_key}_{ean} quedaron en 0. Los restauramos desde el
+            # carrito antes del rerun para que el catálogo los muestre bien.
+            tab_keys = st.session_state.get("tab_keys", ["t0"])
+            for ean, item in st.session_state.get("carrito", {}).items():
+                for tk in tab_keys:
+                    st.session_state[f"q_{tk}_{ean}"] = item["cantidad"]
             st.session_state.page = "catalogo"
             st.rerun()
 
