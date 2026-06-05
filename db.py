@@ -65,6 +65,24 @@ def get_productos() -> list[dict]:
     return res.data or []
 
 
+def actualizar_cliente(cliente_id: str, datos: dict) -> dict:
+    """
+    Actualiza campos del cliente en Supabase.
+    `datos` puede contener: nombre, apellido, telefono, direccion.
+    Retorna el registro actualizado.
+    """
+    sb = get_supabase()
+    # Limpiar strings vacíos y campos no permitidos
+    campos_permitidos = {"nombre", "apellido", "telefono", "direccion"}
+    payload = {
+        k: v.strip() if isinstance(v, str) else v
+        for k, v in datos.items()
+        if k in campos_permitidos and v is not None
+    }
+    res = sb.table("clientes_app").update(payload).eq("id", cliente_id).execute()
+    return res.data[0]
+
+
 def get_familias() -> list[str]:
     productos = get_productos()
     familias = sorted({p["familia"] for p in productos if p.get("familia")})

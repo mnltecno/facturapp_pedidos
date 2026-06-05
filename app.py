@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ── Importar páginas ──────────────────────────────────────────────────────────
-from auth     import page_login, page_registro
+from auth     import page_login, page_registro, page_perfil
 from catalogo import page_catalogo
 from pedido   import page_confirmacion, page_exito
 
@@ -71,6 +71,7 @@ RUTAS = {
     "catalogo":     page_catalogo,
     "confirmacion": page_confirmacion,
     "exito":        page_exito,
+    "perfil":       page_perfil,
 }
 
 handler = RUTAS.get(page, page_login)

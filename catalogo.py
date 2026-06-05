@@ -1,20 +1,16 @@
 """
-pedidos_online/catalogo.py  v6
+pedidos_online/catalogo.py  v7
 ─────────────────────────────────────────────────────────────────────────────
 FIXES aplicados:
-1. number_input recibe value= explícito desde session_state para que las
-   cantidades sobrevivan navegación entre páginas (catálogo → confirmación
-   → catálogo). Sin value= Streamlit puede resetear el widget al mínimo
-   si el widget no existía en el render anterior.
-2. tab_keys se persiste en st.session_state["tab_keys"] para que pedido.py
-   pueda leer el mismo formato de clave al momento de resetear cantidades.
-3. El carrito NO se pisa en cada render; se construye solo al navegar a
-   confirmación (botón explícito).
+1. number_input recibe value= explícito desde session_state.
+2. tab_keys persistido en session_state para que pedido.py resetee bien.
+3. El carrito NO se pisa en cada render.
+4. Restaurado render_sticky_footer para el botón fijo al pie de pantalla.
 ─────────────────────────────────────────────────────────────────────────────
 """
 import streamlit as st
 from db import get_productos
-from styles import inject_css, render_hero, get_emoji
+from styles import inject_css, render_hero, render_sticky_footer, get_emoji
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,26 +192,24 @@ def page_catalogo():
             prods_fam = [p for p in todos_prods if p.get("familia") == familia]
             _render_productos(prods_fam, tab_key=f"t{i+1}", busqueda=busqueda)
 
-    # ── BOTÓN DE CARRITO INFERIOR ─────────────────────────────────────────────
+    # ── BOTÓN STICKY AL PIE (estilo PedidoYa) ────────────────────────────────
+    # render_sticky_footer usa CSS position:fixed — siempre visible al scrollear.
+    # Retorna True si el usuario lo presionó.
     items_bot, total_bot = _resumen_carrito(todos_prods, tab_keys)
-    if items_bot > 0:
-        st.markdown("")
-        _btn_carrito(
-            label       = f"🛒  Confirmar pedido  ·  ${total_bot:,.2f}",
-            key         = "btn_cart_bottom",
-            todos_prods = todos_prods,
-            tab_keys    = tab_keys,
-        )
+    if render_sticky_footer(items_bot, total_bot):
+        _ir_a_carrito(todos_prods, tab_keys)
 
     # ── Footer de sesión ──────────────────────────────────────────────────────
     st.markdown("---")
-    col_a, col_b = st.columns([3, 2])
+    col_a, col_b, col_c = st.columns([3, 1, 1])
     with col_a:
         st.caption(f"👤 {cliente.get('nombre','')} {cliente.get('apellido','')}")
     with col_b:
+        if st.button("✏️ Perfil", key="btn_perfil", use_container_width=True):
+            st.session_state.page = "perfil"
+            st.rerun()
+    with col_c:
         if st.button("🚪 Salir", key="btn_logout", use_container_width=True):
-            # Borrar solo las claves de sesión, no todo session_state.
-            # Esto evita efectos secundarios con el estado de widgets de Streamlit.
             for k in ["cliente", "carrito", "productos_cache",
                       "familias_cache", "tab_keys", "pedido_confirmado"]:
                 st.session_state.pop(k, None)
