@@ -82,18 +82,24 @@ def page_confirmacion():
     # ── Aviso si falta dirección ──────────────────────────────────────────────
     if not cliente.get("direccion"):
         st.warning(
-            "⚠️ **Sin dirección registrada.** Para que la Hoja de Ruta (ORS) "
-            "funcione, actualizá tu perfil con: Calle, Número, Ciudad, Provincia.",
+            "⚠️ **Sin dirección registrada.** La Hoja de Ruta (ORS) necesita "
+            "tu dirección para funcionar.",
             icon="📍",
         )
+        if st.button("✏️ Completar dirección en mi perfil", use_container_width=True):
+            st.session_state.page = "perfil"
+            st.rerun()
 
     # ── Info del cliente ──────────────────────────────────────────────────────
     with st.expander("👤 Datos de entrega", expanded=False):
         st.markdown(
             f"**{cliente.get('apellido')}, {cliente.get('nombre')}**  \n"
             f"📱 {cliente.get('telefono','')}  \n"
-            f"📍 {cliente.get('direccion','')}"
+            f"📍 {cliente.get('direccion') or '*(sin dirección)*'}"
         )
+        if st.button("✏️ Editar perfil", key="btn_editar_perfil", use_container_width=False):
+            st.session_state.page = "perfil"
+            st.rerun()
 
     # ── Items del carrito ─────────────────────────────────────────────────────
     total = 0.0
