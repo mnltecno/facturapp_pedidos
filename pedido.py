@@ -54,6 +54,14 @@ def page_confirmacion():
             st.rerun()
         return
 
+    # ── Aviso si falta dirección ─────────────────────────────────────────────
+    if not cliente.get("direccion"):
+        st.warning(
+            "⚠️ **Sin dirección registrada.** Para que la Hoja de Ruta (ORS) "
+            "funcione, actualizá tu perfil con: Calle, Número, Ciudad, Provincia.",
+            icon="📍",
+        )
+
     # ── Info del cliente ──────────────────────────────────────────────────────
     with st.expander("👤 Datos de entrega", expanded=False):
         st.markdown(
