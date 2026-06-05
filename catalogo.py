@@ -1,11 +1,15 @@
 """
-pedidos_online/catalogo.py  v2
-Sticky footer + contraste corregido + navegación por query params.
+pedidos_online/catalogo.py  v3
+Filtrado por st.tabs nativo — sin CSS forzado en inputs/botones.
 """
 import streamlit as st
-from db import get_productos, get_familias
+from db import get_productos
 from styles import inject_css, render_hero, render_sticky_footer, get_emoji
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _precio_final(p_venta: float, descuento: float) -> float:
     if descuento:
@@ -40,146 +44,129 @@ def _resumen_carrito(productos_db: list[dict]) -> tuple[int, float]:
     return items, round(total, 2)
 
 
+def _render_productos(prods: list[dict], busqueda: str = ""):
+    """
+    Renderiza filas de productos con selector numérico.
+    Las cantidades se guardan automáticamente en st.session_state
+    con key=f"q_{ean13}" — persisten al cambiar de tab.
+    """
+    if busqueda:
+        q = busqueda.strip().lower()
+        prods = [p for p in prods if q in p["descripcion"].lower()]
+
+    if not prods:
+        st.info("Sin productos para este filtro.")
+        return
+
+    for p in prods:
+        ean    = p["ean13"]
+        precio = _precio_final(p["p_venta"], p.get("descuento", 0))
+        dto    = p.get("descuento", 0) or 0
+
+        col_desc, col_precio, col_cant = st.columns([5, 2, 2])
+
+        with col_desc:
+            st.markdown(f"**{p['descripcion']}**")
+            st.caption(f"{get_emoji(p.get('familia',''))} {p.get('familia','')}")
+
+        with col_precio:
+            if dto:
+                st.markdown(f"**${precio:,.2f}**")
+                st.caption(f"-{dto:.0f}%")
+            else:
+                st.markdown(f"**${precio:,.2f}**")
+
+        with col_cant:
+            # value=0 solo se aplica la primera vez que el key no existe
+            st.number_input(
+                label="cantidad",
+                min_value=0, max_value=999, step=1,
+                label_visibility="collapsed",
+                key=f"q_{ean}",
+            )
+
+        st.divider()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Página principal
+# ─────────────────────────────────────────────────────────────────────────────
+
 def page_catalogo():
     inject_css()
 
-    cliente    = st.session_state.get("cliente", {})
+    cliente = st.session_state.get("cliente", {})
 
-    # ── Cargar productos (caché de sesión) ────────────────────────────────────
+    # ── Cargar productos (caché de sesión para no recargar en cada rerun) ─────
     if "productos_cache" not in st.session_state:
         with st.spinner("Cargando catálogo..."):
             st.session_state.productos_cache = get_productos()
-            st.session_state.familias_cache  = sorted(
-                {p["familia"] for p in st.session_state.productos_cache
-                 if p.get("familia")}
-            )
+            # Familias únicas, ordenadas, sin vacíos
+            fams = sorted({
+                p["familia"] for p in st.session_state.productos_cache
+                if p.get("familia")
+            })
+            st.session_state.familias_cache = fams
+
     todos_prods = st.session_state.productos_cache
     familias    = st.session_state.familias_cache
 
-    # ── Navegación desde el sticky footer (query param ?nav=carrito) ──────────
-    nav = st.query_params.get("nav", "")
-    if nav == "carrito":
+    # ── Navegación desde el sticky footer (?nav=carrito) ─────────────────────
+    if st.query_params.get("nav") == "carrito":
         st.query_params.clear()
         st.session_state.carrito = _carrito_desde_state(todos_prods)
         st.session_state.page    = "confirmacion"
         st.rerun()
 
-    # ── Config negocio ────────────────────────────────────────────────────────
+    # ── Config del negocio ────────────────────────────────────────────────────
     try:
-        alias  = st.secrets["negocio"].get("alias",            "mayorista1975")
-        numero = st.secrets["negocio"].get("whatsapp_number",  "")
+        alias  = st.secrets["negocio"].get("alias",           "mayorista1975")
+        numero = st.secrets["negocio"].get("whatsapp_number", "")
     except Exception:
         alias, numero = "mayorista1975", ""
 
-    # ── HERO ─────────────────────────────────────────────────────────────────
+    # ── Hero ──────────────────────────────────────────────────────────────────
     render_hero(n_productos=len(todos_prods), whatsapp_number=numero, alias=alias)
 
-    # ── Buscador ─────────────────────────────────────────────────────────────
+    # ── Buscador global ───────────────────────────────────────────────────────
     busqueda = st.text_input(
-        "buscar", placeholder="🔍  Buscar producto...",
-        label_visibility="collapsed", key="busq_catalogo",
+        "buscar",
+        placeholder="🔍  Buscar producto...",
+        label_visibility="collapsed",
+        key="busq_catalogo",
     )
 
-    # ── Filtros por familia ───────────────────────────────────────────────────
-    opciones = ["🛒 Todos"] + [f"{get_emoji(f)} {f}" for f in familias]
-    try:
-        sel = st.pills(
-            "Familia", opciones,
-            selection_mode="single",
-            default="🛒 Todos",
-            label_visibility="collapsed",
-            key="pill_familia",
-        )
-        familia_activa = (
-            None if (not sel or sel == "🛒 Todos")
-            else sel.split(" ", 1)[-1].strip()
-        )
-    except AttributeError:
-        idx = st.radio(
-            "Familia", range(len(opciones)),
-            format_func=lambda i: opciones[i],
-            horizontal=True, index=0,
-            label_visibility="collapsed",
-            key="radio_familia",
-        )
-        familia_activa = None if idx == 0 else opciones[idx].split(" ", 1)[-1].strip()
+    # ── TABS DE FAMILIAS (nativas Streamlit) ──────────────────────────────────
+    # "🛒 Todos" primero, luego una tab por cada familia con su emoji
+    tab_labels = ["🛒 Todos"] + [
+        f"{get_emoji(f)} {f}" for f in familias
+    ]
+    tabs = st.tabs(tab_labels)
 
-    # ── Filtrar ───────────────────────────────────────────────────────────────
-    prods = todos_prods
-    if familia_activa:
-        prods = [p for p in prods if p.get("familia") == familia_activa]
-    if busqueda:
-        q = busqueda.strip().lower()
-        prods = [p for p in prods
-                 if q in p["descripcion"].lower()
-                 or q in (p.get("familia") or "").lower()]
+    # Tab "Todos"
+    with tabs[0]:
+        _render_productos(todos_prods, busqueda)
 
-    fam_label = familia_activa or "Todos los productos"
-    st.markdown(
-        f"<div style='padding:.4rem 0 .2rem;font-size:.75rem;color:#555;"
-        f"font-weight:600;text-transform:uppercase;letter-spacing:.5px'>"
-        f"{fam_label} — {len(prods)} artículos</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Lista de productos ────────────────────────────────────────────────────
-    if not prods:
-        st.info("Sin resultados para este filtro.")
-    else:
-        for p in prods:
-            ean    = p["ean13"]
-            precio = _precio_final(p["p_venta"], p.get("descuento", 0))
-
-            col_info, col_precio, col_cant = st.columns([5, 2, 2])
-
-            with col_info:
-                dto_html = (
-                    f"<span style='font-size:.65rem;color:#f59e0b'> -"
-                    f"{p['descuento']:.0f}%</span>"
-                    if p.get("descuento") else ""
-                )
-                st.markdown(
-                    f"<div style='padding:.4rem 0'>"
-                    f"<div style='font-weight:600;font-size:.86rem;color:#f0f0f0'>"
-                    f"{p['descripcion']}</div>"
-                    f"<div style='font-size:.68rem;color:#555;margin-top:1px'>"
-                    f"{get_emoji(p.get('familia',''))} {p.get('familia','')}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-
-            with col_precio:
-                st.markdown(
-                    f"<div style='padding:.5rem 0;font-weight:800;font-size:.9rem;"
-                    f"color:#22c55e;text-align:right'>${precio:,.2f}{dto_html}</div>",
-                    unsafe_allow_html=True,
-                )
-
-            with col_cant:
-                # value=0 solo aplica en la primera render (si el key no existe)
-                st.number_input(
-                    "cant", min_value=0, max_value=999,
-                    step=1, label_visibility="collapsed",
-                    key=f"q_{ean}",
-                )
-
-            st.markdown(
-                "<hr style='margin:.1rem 0;border-color:#1a1a1a'>",
-                unsafe_allow_html=True,
-            )
+    # Una tab por familia
+    for i, familia in enumerate(familias):
+        with tabs[i + 1]:
+            prods_familia = [
+                p for p in todos_prods if p.get("familia") == familia
+            ]
+            _render_productos(prods_familia, busqueda)
 
     # ── Footer de sesión ──────────────────────────────────────────────────────
-    st.markdown(
-        f"<div style='padding:.5rem 0;font-size:.75rem;color:#444'>"
-        f"👤 {cliente.get('nombre','')} {cliente.get('apellido','')}</div>",
-        unsafe_allow_html=True,
-    )
-    if st.button("🚪 Cerrar sesión", key="btn_logout"):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
-        st.session_state.page = "login"
-        st.rerun()
+    st.markdown("---")
+    cols = st.columns([3, 2])
+    with cols[0]:
+        st.caption(f"👤 {cliente.get('nombre','')} {cliente.get('apellido','')}")
+    with cols[1]:
+        if st.button("🚪 Salir", key="btn_logout", use_container_width=True):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.session_state.page = "login"
+            st.rerun()
 
-    # ── STICKY FOOTER (siempre al final, fijo en pantalla) ────────────────────
+    # ── Sticky footer — siempre fijo al pie ───────────────────────────────────
     items_cart, total_cart = _resumen_carrito(todos_prods)
     render_sticky_footer(items_cart, total_cart)
