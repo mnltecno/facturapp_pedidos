@@ -1,122 +1,230 @@
 """
 pedidos_online/catalogo.py
-Página de catálogo + carrito interactivo.
+Catálogo Parada Técnica — diseño dark premium.
 """
 import streamlit as st
 from db import get_productos, get_familias
-from styles import inject_css, header
+from styles import inject_css, render_hero, get_emoji
 
 
-def _fmt_precio(precio: float, descuento: float) -> str:
-    if descuento and descuento > 0:
-        final = precio * (1 - descuento / 100)
-        return f"${final:,.2f}  <span style='color:#f59e0b;font-size:.75rem'>(-{descuento:.0f}%)</span>"
-    return f"${precio:,.2f}"
+# ────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────────────────
+
+def _precio_final(p_venta: float, descuento: float) -> float:
+    if descuento:
+        return round(p_venta * (1 - descuento / 100), 2)
+    return round(p_venta, 2)
 
 
-def _precio_final(precio: float, descuento: float) -> float:
-    if descuento and descuento > 0:
-        return round(precio * (1 - descuento / 100), 2)
-    return round(precio, 2)
+def _carrito_desde_state(productos_db: list[dict]) -> dict:
+    """Construye el carrito leyendo los session_state de cada input de cantidad."""
+    carrito = {}
+    for p in productos_db:
+        ean  = p["ean13"]
+        cant = st.session_state.get(f"q_{ean}", 0)
+        if cant and cant > 0:
+            precio = _precio_final(p["p_venta"], p.get("descuento", 0))
+            carrito[ean] = {
+                "ean13":           ean,
+                "descripcion":     p["descripcion"],
+                "cantidad":        cant,
+                "precio_unitario": precio,
+                "subtotal":        round(precio * cant, 2),
+            }
+    return carrito
 
+
+def _resumen_carrito(productos_db: list[dict]) -> tuple[int, float]:
+    """Retorna (total_items, total_$) del carrito actual."""
+    items = total = 0
+    for p in productos_db:
+        cant = st.session_state.get(f"q_{p['ean13']}", 0) or 0
+        if cant > 0:
+            items += cant
+            total += _precio_final(p["p_venta"], p.get("descuento", 0)) * cant
+    return items, round(total, 2)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Página principal del catálogo
+# ────────────────────────────────────────────────────────────────────────────
 
 def page_catalogo():
     inject_css()
 
     cliente = st.session_state.get("cliente", {})
-    carrito = st.session_state.setdefault("carrito", {})
 
-    header(
-        "Catálogo",
-        f"Hola, {cliente.get('nombre', '')} 👋"
+    # ── Cargar datos (cacheados en session para no recargar en cada rerun) ──
+    if "productos_cache" not in st.session_state:
+        with st.spinner("Cargando catálogo..."):
+            st.session_state.productos_cache  = get_productos()
+            st.session_state.familias_cache   = sorted(
+                {p["familia"] for p in st.session_state.productos_cache if p.get("familia")}
+            )
+
+    todos_prods = st.session_state.productos_cache
+    familias    = st.session_state.familias_cache
+
+    # ── Leer config del negocio ──────────────────────────────────────────────
+    try:
+        alias   = st.secrets["negocio"].get("alias",            "mayorista1975")
+        numero  = st.secrets["negocio"].get("whatsapp_number",  "")
+    except Exception:
+        alias, numero = "mayorista1975", ""
+
+    # ── Resumen carrito ──────────────────────────────────────────────────────
+    items_cart, total_cart = _resumen_carrito(todos_prods)
+
+    # ── HERO ─────────────────────────────────────────────────────────────────
+    render_hero(
+        n_productos    = len(todos_prods),
+        whatsapp_number= numero,
+        alias          = alias,
+        items_carrito  = items_cart,
+        total_carrito  = total_cart,
     )
 
-    # ── Barra de búsqueda ────────────────────────────────────────────────────
-    col_b, col_f = st.columns([3, 2])
-    with col_b:
-        busqueda = st.text_input("🔍 Buscar producto", placeholder="Descripción...",
-                                 label_visibility="collapsed", key="busq")
-    with col_f:
-        familias = ["Todas"] + get_familias()
-        familia_sel = st.selectbox("Familia", familias, label_visibility="collapsed", key="fam")
+    # ── Buscador ─────────────────────────────────────────────────────────────
+    busqueda = st.text_input(
+        "buscar", placeholder="🔍  Buscar producto...",
+        label_visibility="collapsed", key="busq_catalogo"
+    )
 
-    # ── Cargar productos ──────────────────────────────────────────────────────
-    with st.spinner("Cargando catálogo..."):
-        productos = get_productos()
+    # ── Filtros por familia (pills) ───────────────────────────────────────────
+    opciones_pills = ["🛒 Todos"] + [f"{get_emoji(f)} {f}" for f in familias]
 
-    # Filtrar
+    try:
+        # st.pills disponible en Streamlit >= 1.38
+        sel_pill = st.pills(
+            "Familia", opciones_pills,
+            selection_mode="single",
+            default="🛒 Todos",
+            label_visibility="collapsed",
+            key="pill_familia",
+        )
+        familia_activa = (
+            None if (not sel_pill or sel_pill == "🛒 Todos")
+            else sel_pill.split(" ", 1)[-1].strip()
+        )
+    except AttributeError:
+        # Fallback para versiones antiguas
+        sel_idx = st.radio(
+            "Familia", range(len(opciones_pills)),
+            format_func=lambda i: opciones_pills[i],
+            horizontal=True, index=0,
+            label_visibility="collapsed", key="radio_familia",
+        )
+        familia_activa = (
+            None if sel_idx == 0
+            else opciones_pills[sel_idx].split(" ", 1)[-1].strip()
+        )
+
+    # ── Filtrar productos ─────────────────────────────────────────────────────
+    prods = todos_prods
+    if familia_activa:
+        prods = [p for p in prods if p.get("familia") == familia_activa]
     if busqueda:
-        q = busqueda.lower()
-        productos = [p for p in productos if q in p["descripcion"].lower()]
-    if familia_sel and familia_sel != "Todas":
-        productos = [p for p in productos if p.get("familia") == familia_sel]
+        q = busqueda.strip().lower()
+        prods = [p for p in prods if q in p["descripcion"].lower()
+                 or q in (p.get("familia") or "").lower()]
 
-    if not productos:
-        st.info("No se encontraron productos.")
+    # ── Header sección ────────────────────────────────────────────────────────
+    fam_label = familia_activa or "Todos los productos"
+    st.markdown(
+        f"<div style='padding:.5rem 1.2rem .2rem;"
+        f"font-size:.8rem;color:#555;font-weight:600;text-transform:uppercase;"
+        f"letter-spacing:.5px'>{fam_label} — {len(prods)} artículos</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Lista de productos ────────────────────────────────────────────────────
+    if not prods:
+        st.info("No hay productos para este filtro.")
     else:
-        st.markdown(f"**{len(productos)} productos**")
+        for p in prods:
+            ean    = p["ean13"]
+            precio = _precio_final(p["p_venta"], p.get("descuento", 0))
+            q_key  = f"q_{ean}"
 
-        for prod in productos:
-            ean    = prod["ean13"]
-            precio = _precio_final(prod["p_venta"], prod["descuento"])
-            en_carrito = carrito.get(ean, {}).get("cantidad", 0)
+            col_info, col_precio, col_cant = st.columns([5, 2, 2])
 
-            with st.container():
-                c1, c2 = st.columns([4, 3])
-                with c1:
-                    st.markdown(
-                        f"**{prod['descripcion']}**  \n"
-                        f"<span style='color:#888;font-size:.75rem'>{prod.get('familia','')}</span>  \n"
-                        f"<span style='color:#4ade80;font-size:1rem;font-weight:700'>${precio:,.2f}</span>"
-                        + (f"  <span style='color:#f59e0b;font-size:.72rem'>(-{prod['descuento']:.0f}%)</span>"
-                           if prod.get("descuento") else ""),
-                        unsafe_allow_html=True,
-                    )
-                with c2:
-                    cant_key = f"cant_{ean}"
-                    if cant_key not in st.session_state:
-                        st.session_state[cant_key] = en_carrito if en_carrito else 1
+            with col_info:
+                st.markdown(
+                    f"<div style='padding:.45rem 0'>"
+                    f"<div style='font-weight:600;font-size:.88rem;color:#f0f0f0;"
+                    f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                    f"{p['descripcion']}</div>"
+                    f"<div style='font-size:.7rem;color:#555;margin-top:1px'>"
+                    f"{get_emoji(p.get('familia',''))} {p.get('familia','')}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
-                    cant = st.number_input(
-                        "Cant.", min_value=0, max_value=999,
-                        value=st.session_state[cant_key],
-                        key=cant_key, label_visibility="collapsed",
-                        step=1
-                    )
-                    if cant > 0:
-                        carrito[ean] = {
-                            "ean13":           ean,
-                            "descripcion":     prod["descripcion"],
-                            "cantidad":        cant,
-                            "precio_unitario": precio,
-                            "subtotal":        round(precio * cant, 2),
-                        }
-                    elif ean in carrito:
-                        del carrito[ean]
+            with col_precio:
+                st.markdown(
+                    f"<div style='padding:.55rem 0;font-weight:800;font-size:.95rem;"
+                    f"color:#22c55e;text-align:right'>${precio:,.2f}"
+                    + (f"<div style='font-size:.65rem;color:#f59e0b'>-{p['descuento']:.0f}%</div>"
+                       if p.get("descuento") else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
 
-                st.divider()
+            with col_cant:
+                # value=0 solo se aplica la primera vez (si el key no existe aún)
+                st.number_input(
+                    "cant", min_value=0, max_value=999,
+                    step=1, label_visibility="collapsed",
+                    key=q_key,
+                )
 
-    st.session_state.carrito = carrito
+            st.markdown(
+                "<hr style='margin:0;border-color:#1e1e1e'>",
+                unsafe_allow_html=True,
+            )
 
-    # ── Botón flotante de carrito ─────────────────────────────────────────────
-    items_total = sum(v["cantidad"] for v in carrito.values())
-    monto_total = sum(v["subtotal"] for v in carrito.values())
+    # ── Botón fijo de carrito ─────────────────────────────────────────────────
+    # Recalcular después de renderizar los inputs
+    items_cart2, total_cart2 = _resumen_carrito(todos_prods)
 
-    if items_total > 0:
+    if items_cart2 > 0:
+        st.markdown("<div style='height:4rem'></div>", unsafe_allow_html=True)
         st.markdown(
-            f'<div class="carrito-badge">🛒 {items_total} items — ${monto_total:,.2f}</div>',
+            f"""<div class="carrito-sticky">
+                  <div style="display:flex;align-items:center;
+                              justify-content:space-between;gap:.5rem">
+                    <span style="font-size:.8rem;color:#666">
+                      {items_cart2} artículos seleccionados
+                    </span>
+                  </div>
+                </div>""",
             unsafe_allow_html=True,
         )
-        st.markdown("---")
-        if st.button(f"🛒 Ver carrito y confirmar ({items_total} items)",
-                     use_container_width=True, type="primary"):
+        if st.button(
+            f"🛒  Ver pedido  ·  ${total_cart2:,.2f}",
+            use_container_width=True,
+            type="primary",
+            key="btn_ver_carrito",
+        ):
+            # Construir carrito antes de navegar
+            st.session_state.carrito = _carrito_desde_state(todos_prods)
             st.session_state.page = "confirmacion"
             st.rerun()
 
     # ── Footer ────────────────────────────────────────────────────────────────
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
     st.markdown("---")
-    if st.button("🚪 Cerrar sesión", use_container_width=True):
-        for k in ["cliente", "carrito", "page"]:
-            st.session_state.pop(k, None)
-        st.session_state.page = "login"
-        st.rerun()
+    col_a, col_b = st.columns(2)
+    with col_a:
+        nombre = cliente.get("nombre", "")
+        st.markdown(
+            f"<div style='font-size:.75rem;color:#555'>👤 {nombre}</div>",
+            unsafe_allow_html=True,
+        )
+    with col_b:
+        if st.button("Cerrar sesión", key="btn_logout"):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.session_state.page = "login"
+            st.rerun()
