@@ -1,15 +1,24 @@
 """
-pedidos_online/catalogo.py  v4
-Claves únicas por tab (q_t{idx}_{ean}) — sin DuplicateElementKey.
-El carrito toma el MAX entre todos los tabs para cada producto.
+pedidos_online/catalogo.py  v6
+─────────────────────────────────────────────────────────────────────────────
+FIXES aplicados:
+1. number_input recibe value= explícito desde session_state para que las
+   cantidades sobrevivan navegación entre páginas (catálogo → confirmación
+   → catálogo). Sin value= Streamlit puede resetear el widget al mínimo
+   si el widget no existía en el render anterior.
+2. tab_keys se persiste en st.session_state["tab_keys"] para que pedido.py
+   pueda leer el mismo formato de clave al momento de resetear cantidades.
+3. El carrito NO se pisa en cada render; se construye solo al navegar a
+   confirmación (botón explícito).
+─────────────────────────────────────────────────────────────────────────────
 """
 import streamlit as st
 from db import get_productos
-from styles import inject_css, render_hero, render_sticky_footer, get_emoji
+from styles import inject_css, render_hero, get_emoji
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers de precio
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _precio_final(p_venta: float, descuento: float) -> float:
@@ -18,13 +27,8 @@ def _precio_final(p_venta: float, descuento: float) -> float:
     return round(p_venta, 2)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Carrito: lee TODAS las tabs y toma el MAX por producto
-# (evita doble-conteo cuando el mismo ean aparece en "Todos" y en su familia)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _cant_producto(ean: str, tab_keys: list[str]) -> int:
-    """Devuelve la cantidad máxima registrada para un producto en cualquier tab."""
+    """MAX entre todos los tabs del mismo producto (evita doble conteo)."""
     return max(
         (st.session_state.get(f"q_{tk}_{ean}", 0) or 0 for tk in tab_keys),
         default=0,
@@ -58,15 +62,24 @@ def _carrito_desde_state(todos_prods: list[dict], tab_keys: list[str]) -> dict:
     return carrito
 
 
+def _ir_a_carrito(todos_prods: list[dict], tab_keys: list[str]):
+    """Construye el carrito y navega a confirmación — todo dentro de Streamlit."""
+    st.session_state.carrito = _carrito_desde_state(todos_prods, tab_keys)
+    st.session_state.page    = "confirmacion"
+    st.rerun()
+
+
+def _btn_carrito(label: str, key: str, todos_prods: list[dict], tab_keys: list[str]):
+    """Botón verde de ver pedido."""
+    if st.button(label, key=key, use_container_width=True, type="primary"):
+        _ir_a_carrito(todos_prods, tab_keys)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Renderizado de productos en una tab
+# Renderizado de productos
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_productos(prods: list[dict], tab_key: str, busqueda: str = ""):
-    """
-    Renderiza productos con key=f"q_{tab_key}_{ean}" — ÚNICO por tab.
-    El tab_key es un string corto (t0, t1, t2, …) sin caracteres especiales.
-    """
     if busqueda:
         q = busqueda.strip().lower()
         prods = [p for p in prods if q in p["descripcion"].lower()]
@@ -92,12 +105,21 @@ def _render_productos(prods: list[dict], tab_key: str, busqueda: str = ""):
                 st.caption(f"-{dto:.0f}%")
 
         with col_cant:
-            # Clave ÚNICA: tab_key + ean — resuelve el DuplicateElementKey
+            widget_key = f"q_{tab_key}_{ean}"
+
+            # FIX: value= explícito desde session_state.
+            # Sin esto, al volver del carrito al catálogo el widget
+            # se reinicia a 0 aunque la clave ya exista en session_state,
+            # porque Streamlit solo garantiza persistencia si el widget
+            # se renderizó en el rerun inmediatamente anterior.
+            valor_actual = st.session_state.get(widget_key, 0) or 0
+
             st.number_input(
                 label="cantidad",
                 min_value=0, max_value=999, step=1,
+                value=valor_actual,
                 label_visibility="collapsed",
-                key=f"q_{tab_key}_{ean}",
+                key=widget_key,
             )
 
         st.divider()
@@ -112,7 +134,8 @@ def page_catalogo():
 
     cliente = st.session_state.get("cliente", {})
 
-    # ── Cargar productos (caché de sesión) ────────────────────────────────────
+    # ── Cargar catálogo (caché de sesión) ─────────────────────────────────────
+    # FIX: "if not in" garantiza que no se pisa la caché en reruns.
     if "productos_cache" not in st.session_state:
         with st.spinner("Cargando catálogo..."):
             st.session_state.productos_cache = get_productos()
@@ -124,18 +147,12 @@ def page_catalogo():
     todos_prods = st.session_state.productos_cache
     familias    = st.session_state.familias_cache
 
-    # ── Lista de tab_keys: "t0" = Todos, "t1".."tN" = familias ───────────────
-    # Se guarda en session_state para que _carrito_desde_state la use
-    # desde la navegación por query_params (antes de que se recreen los tabs)
+    # Tab keys: t0 = Todos, t1..tN = familias
     tab_keys = ["t0"] + [f"t{i+1}" for i in range(len(familias))]
-    st.session_state["tab_keys"] = tab_keys
 
-    # ── Navegación desde sticky footer (?nav=carrito) ─────────────────────────
-    if st.query_params.get("nav") == "carrito":
-        st.query_params.clear()
-        st.session_state.carrito = _carrito_desde_state(todos_prods, tab_keys)
-        st.session_state.page    = "confirmacion"
-        st.rerun()
+    # FIX: persistir tab_keys en session_state para que pedido.py
+    # pueda leer el mismo formato de clave al resetear cantidades.
+    st.session_state["tab_keys"] = tab_keys
 
     # ── Config del negocio ────────────────────────────────────────────────────
     try:
@@ -147,7 +164,19 @@ def page_catalogo():
     # ── Hero ──────────────────────────────────────────────────────────────────
     render_hero(n_productos=len(todos_prods), whatsapp_number=numero, alias=alias)
 
-    # ── Buscador global ───────────────────────────────────────────────────────
+    # ── BOTÓN DE CARRITO SUPERIOR ─────────────────────────────────────────────
+    items_top, total_top = _resumen_carrito(todos_prods, tab_keys)
+    if items_top > 0:
+        st.markdown("")
+        _btn_carrito(
+            label       = f"🛒  Ver pedido  ({items_top} items)  ·  ${total_top:,.2f}",
+            key         = "btn_cart_top",
+            todos_prods = todos_prods,
+            tab_keys    = tab_keys,
+        )
+        st.markdown("")
+
+    # ── Buscador ──────────────────────────────────────────────────────────────
     busqueda = st.text_input(
         "buscar",
         placeholder="🔍  Buscar producto...",
@@ -155,19 +184,28 @@ def page_catalogo():
         key="busq_catalogo",
     )
 
-    # ── TABS DINÁMICAS ────────────────────────────────────────────────────────
+    # ── TABS DE FAMILIAS ──────────────────────────────────────────────────────
     tab_labels = ["🛒 Todos"] + [f"{get_emoji(f)} {f}" for f in familias]
     tabs = st.tabs(tab_labels)
 
-    # Tab "Todos" — tab_key = "t0"
     with tabs[0]:
         _render_productos(todos_prods, tab_key="t0", busqueda=busqueda)
 
-    # Tabs por familia — tab_key = "t1", "t2", …
     for i, familia in enumerate(familias):
         with tabs[i + 1]:
             prods_fam = [p for p in todos_prods if p.get("familia") == familia]
             _render_productos(prods_fam, tab_key=f"t{i+1}", busqueda=busqueda)
+
+    # ── BOTÓN DE CARRITO INFERIOR ─────────────────────────────────────────────
+    items_bot, total_bot = _resumen_carrito(todos_prods, tab_keys)
+    if items_bot > 0:
+        st.markdown("")
+        _btn_carrito(
+            label       = f"🛒  Confirmar pedido  ·  ${total_bot:,.2f}",
+            key         = "btn_cart_bottom",
+            todos_prods = todos_prods,
+            tab_keys    = tab_keys,
+        )
 
     # ── Footer de sesión ──────────────────────────────────────────────────────
     st.markdown("---")
@@ -176,11 +214,10 @@ def page_catalogo():
         st.caption(f"👤 {cliente.get('nombre','')} {cliente.get('apellido','')}")
     with col_b:
         if st.button("🚪 Salir", key="btn_logout", use_container_width=True):
-            for k in list(st.session_state.keys()):
-                del st.session_state[k]
+            # Borrar solo las claves de sesión, no todo session_state.
+            # Esto evita efectos secundarios con el estado de widgets de Streamlit.
+            for k in ["cliente", "carrito", "productos_cache",
+                      "familias_cache", "tab_keys", "pedido_confirmado"]:
+                st.session_state.pop(k, None)
             st.session_state.page = "login"
             st.rerun()
-
-    # ── Sticky footer ─────────────────────────────────────────────────────────
-    items_cart, total_cart = _resumen_carrito(todos_prods, tab_keys)
-    render_sticky_footer(items_cart, total_cart)

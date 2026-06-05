@@ -1,6 +1,15 @@
 """
 pedidos_online/pedido.py
 Confirmación de pedido y pantalla de éxito — diseño Parada Técnica.
+
+FIXES aplicados:
+1. q_key usaba formato incorrecto "q_{ean}" en vez de "q_{tab_key}_{ean}".
+   Ahora itera sobre tab_keys guardados en session_state para resetear
+   TODAS las variantes de clave de cada producto.
+2. El carrito se vacía SOLO en dos casos explícitos:
+   a) El usuario pulsa "🧹 Vaciar carrito"
+   b) El pedido se guarda exitosamente en Supabase
+   En cualquier otro caso (error, rerun, navegación) el carrito se preserva.
 """
 import urllib.parse
 import streamlit as st
@@ -34,6 +43,22 @@ def _generar_mensaje_whatsapp(cliente: dict, carrito: dict, total: float) -> str
     )
 
 
+def _resetear_cantidades_catalogo(eans: list[str]) -> None:
+    """
+    Resetea los number_input del catálogo para los EANs indicados.
+
+    FIX CRÍTICO: el formato de clave es "q_{tab_key}_{ean}", NO "q_{ean}".
+    Leemos tab_keys desde session_state (guardado por catalogo.py) para
+    resetear todas las variantes (t0, t1, t2, …) de cada producto.
+    """
+    tab_keys = st.session_state.get("tab_keys", ["t0"])
+    for ean in eans:
+        for tk in tab_keys:
+            widget_key = f"q_{tk}_{ean}"
+            if widget_key in st.session_state:
+                st.session_state[widget_key] = 0
+
+
 def page_confirmacion():
     inject_css()
 
@@ -54,7 +79,7 @@ def page_confirmacion():
             st.rerun()
         return
 
-    # ── Aviso si falta dirección ─────────────────────────────────────────────
+    # ── Aviso si falta dirección ──────────────────────────────────────────────
     if not cliente.get("direccion"):
         st.warning(
             "⚠️ **Sin dirección registrada.** Para que la Hoja de Ruta (ORS) "
@@ -101,18 +126,15 @@ def page_confirmacion():
         )
         total += item["subtotal"]
 
-    # Procesar borrados
-    for ean in eans_a_borrar:
-        del carrito[ean]
-        # Resetear el número input en el catálogo
-        q_key = f"q_{ean}"
-        if q_key in st.session_state:
-            st.session_state[q_key] = 0
+    # Procesar borrados — resetea las claves correctas del catálogo
     if eans_a_borrar:
+        for ean in eans_a_borrar:
+            carrito.pop(ean, None)
+        _resetear_cantidades_catalogo(eans_a_borrar)   # FIX: usa tab_keys
         st.session_state.carrito = carrito
         st.rerun()
 
-    # ── Total ────────────────────────────────────────────────────────────────
+    # ── Total ─────────────────────────────────────────────────────────────────
     st.markdown(
         f"""<div class="cart-total">
               <div class="ct-label">TOTAL A PAGAR</div>
@@ -132,16 +154,14 @@ def page_confirmacion():
     col_a, col_b = st.columns(2)
     with col_a:
         if st.button("🧹 Vaciar carrito", use_container_width=True):
-            # Resetear todos los inputs del catálogo
-            for ean in list(carrito.keys()):
-                q_key = f"q_{ean}"
-                if q_key in st.session_state:
-                    st.session_state[q_key] = 0
+            # Resetea TODAS las claves q_{tab_key}_{ean} del catálogo
+            _resetear_cantidades_catalogo(list(carrito.keys()))  # FIX
             st.session_state.carrito = {}
             st.session_state.page = "catalogo"
             st.rerun()
     with col_b:
         if st.button("← Seguir comprando", use_container_width=True):
+            # NO vaciamos el carrito: el usuario quiere agregar más cosas
             st.session_state.page = "catalogo"
             st.rerun()
 
@@ -155,20 +175,25 @@ def page_confirmacion():
                     items=list(carrito.values()),
                     total=round(total, 2),
                 )
-                # Limpiar carrito e inputs
-                for ean in carrito:
-                    if f"q_{ean}" in st.session_state:
-                        st.session_state[f"q_{ean}"] = 0
+                # FIX: resetear con la función correcta (usa tab_keys)
+                _resetear_cantidades_catalogo(list(carrito.keys()))
+
+                # Guardar info para página de éxito ANTES de vaciar carrito
                 st.session_state.pedido_confirmado = {
                     "id":    pedido_id,
                     "total": round(total, 2),
                     "msg":   _generar_mensaje_whatsapp(cliente, carrito, total),
                 }
+
+                # Vaciar el carrito SOLO tras confirmación exitosa en Supabase
                 st.session_state.carrito = {}
                 st.session_state.page = "exito"
                 st.rerun()
+
             except Exception as ex:
+                # El carrito NO se vacía si hubo error
                 st.error(f"Error al guardar: {ex}")
+                st.warning("Tu carrito fue conservado. Podés intentar de nuevo.")
 
 
 def page_exito():
