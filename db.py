@@ -1,6 +1,8 @@
 """
 pedidos_online/db.py
 Cliente Supabase singleton con helpers CRUD.
+Todas las funciones de datos reciben `negocio_id` para aislar
+los datos de cada distribuidor que usa FacturApp.
 """
 import hashlib
 import streamlit as st
@@ -23,15 +25,20 @@ def hash_password(password: str, salt: str = "") -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def get_cliente_by_email(email: str) -> dict | None:
-    sb = get_supabase()
-    res = sb.table("clientes_app").select("*").eq("email", email).execute()
+def get_cliente_by_email(email: str, negocio_id: str) -> dict | None:
+    sb  = get_supabase()
+    res = (sb.table("clientes_app")
+             .select("*")
+             .eq("email", email)
+             .eq("negocio_id", negocio_id)
+             .execute())
     return res.data[0] if res.data else None
 
 
 def crear_cliente(apellido: str, nombre: str, telefono: str,
-                  email: str, direccion: str, password: str) -> dict:
-    sb = get_supabase()
+                  email: str, direccion: str, password: str,
+                  negocio_id: str) -> dict:
+    sb  = get_supabase()
     row = {
         "apellido":      apellido.strip(),
         "nombre":        nombre.strip(),
@@ -39,14 +46,15 @@ def crear_cliente(apellido: str, nombre: str, telefono: str,
         "email":         email.strip().lower(),
         "direccion":     direccion.strip(),
         "password_hash": hash_password(password, email.strip().lower()),
+        "negocio_id":    negocio_id,
     }
     res = sb.table("clientes_app").insert(row).execute()
     return res.data[0]
 
 
-def verificar_password(email: str, password: str) -> dict | None:
+def verificar_password(email: str, password: str, negocio_id: str) -> dict | None:
     """Retorna el cliente si la contraseña es correcta, None si no."""
-    cliente = get_cliente_by_email(email)
+    cliente = get_cliente_by_email(email, negocio_id)
     if not cliente:
         return None
     expected = hash_password(password, email.strip().lower())
@@ -55,10 +63,11 @@ def verificar_password(email: str, password: str) -> dict | None:
 
 # ── Catálogo ─────────────────────────────────────────────────────────────────
 
-def get_productos() -> list[dict]:
-    sb = get_supabase()
+def get_productos(negocio_id: str) -> list[dict]:
+    sb  = get_supabase()
     res = (sb.table("productos_catalogo")
              .select("ean13,descripcion,familia,p_venta,descuento")
+             .eq("negocio_id", negocio_id)
              .eq("activo", True)
              .order("descripcion")
              .execute())
@@ -72,8 +81,7 @@ def actualizar_cliente(cliente_id: str, datos: dict) -> dict:
     Retorna el registro actualizado.
     """
     sb = get_supabase()
-    # Limpiar strings vacíos y campos no permitidos
-    campos_permitidos = {"nombre", "apellido", "telefono", "direccion"}
+    campos_permitidos = {"nombre", "apellido", "telefono", "direccion", "password_hash"}
     payload = {
         k: v.strip() if isinstance(v, str) else v
         for k, v in datos.items()
@@ -83,15 +91,15 @@ def actualizar_cliente(cliente_id: str, datos: dict) -> dict:
     return res.data[0]
 
 
-def get_familias() -> list[str]:
-    productos = get_productos()
-    familias = sorted({p["familia"] for p in productos if p.get("familia")})
-    return familias
+def get_familias(negocio_id: str) -> list[str]:
+    productos = get_productos(negocio_id)
+    return sorted({p["familia"] for p in productos if p.get("familia")})
 
 
 # ── Pedidos ──────────────────────────────────────────────────────────────────
 
-def guardar_pedido(cliente_id: str, items: list[dict], total: float) -> int:
+def guardar_pedido(cliente_id: str, items: list[dict], total: float,
+                   negocio_id: str) -> int:
     """Guarda cabecera + detalles. Retorna el id del pedido creado."""
     sb = get_supabase()
 
@@ -100,6 +108,7 @@ def guardar_pedido(cliente_id: str, items: list[dict], total: float) -> int:
         "cliente_id": cliente_id,
         "total":      round(total, 2),
         "estado":     "Pendiente",
+        "negocio_id": negocio_id,
     }).execute()
     pedido_id = pedido_res.data[0]["id"]
 
@@ -119,12 +128,13 @@ def guardar_pedido(cliente_id: str, items: list[dict], total: float) -> int:
     return pedido_id
 
 
-def get_pedidos_pendientes() -> list[dict]:
-    """Para FacturApp desktop: devuelve pedidos con estado Pendiente."""
-    sb = get_supabase()
+def get_pedidos_pendientes(negocio_id: str) -> list[dict]:
+    """Para FacturApp desktop: devuelve pedidos con estado Pendiente del negocio."""
+    sb  = get_supabase()
     res = (sb.table("pedidos")
              .select("*, clientes_app(*), pedido_detalles(*)")
              .eq("estado", "Pendiente")
+             .eq("negocio_id", negocio_id)
              .order("created_at")
              .execute())
     return res.data or []
@@ -135,9 +145,9 @@ def marcar_pedido_importado(pedido_id: int):
     sb.table("pedidos").update({"estado": "Importado"}).eq("id", pedido_id).execute()
 
 
-def sincronizar_productos(productos: list[dict]):
-    """Upsert masivo de productos desde SQLite → Supabase."""
-    sb = get_supabase()
+def sincronizar_productos(productos: list[dict], negocio_id: str) -> int:
+    """Upsert masivo de productos desde SQLite → Supabase, filtrado por negocio."""
+    sb   = get_supabase()
     rows = [
         {
             "ean13":       p["ean13"],
@@ -146,9 +156,13 @@ def sincronizar_productos(productos: list[dict]):
             "p_venta":     float(p.get("p_venta") or p.get("precio_venta") or 0),
             "descuento":   float(p.get("descuento") or p.get("descuento_pct") or 0),
             "activo":      True,
+            "negocio_id":  negocio_id,
         }
         for p in productos if p.get("ean13")
     ]
     if rows:
-        sb.table("productos_catalogo").upsert(rows).execute()
+        # El upsert usa el índice compuesto uidx_productos_ean13_negocio
+        sb.table("productos_catalogo").upsert(
+            rows, on_conflict="ean13,negocio_id"
+        ).execute()
     return len(rows)

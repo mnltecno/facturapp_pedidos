@@ -21,6 +21,7 @@ def page_login():
 
     st.markdown("### Iniciar sesión")
 
+    negocio_id = st.session_state.get("negocio_id", "")
     email    = st.text_input("📧 Email", placeholder="tu@email.com", key="li_email")
     password = st.text_input("🔒 Contraseña", type="password", key="li_pass")
 
@@ -29,7 +30,7 @@ def page_login():
             st.error("Completá email y contraseña.")
             return
         with st.spinner("Verificando..."):
-            cliente = verificar_password(email.strip().lower(), password)
+            cliente = verificar_password(email.strip().lower(), password, negocio_id)
         if cliente:
             st.session_state.cliente = cliente
             st.session_state.page    = "catalogo"
@@ -86,7 +87,8 @@ def page_registro():
                 st.error(e)
             return
 
-        if get_cliente_by_email(email.strip().lower()):
+        negocio_id = st.session_state.get("negocio_id", "")
+        if get_cliente_by_email(email.strip().lower(), negocio_id):
             st.error("Ya existe una cuenta con ese email.")
             return
 
@@ -102,6 +104,7 @@ def page_registro():
                     email=email.strip().lower(),
                     direccion=direccion,
                     password=password,
+                    negocio_id=negocio_id,
                 )
                 st.session_state.cliente = cliente
                 st.session_state.page    = "catalogo"

@@ -3,9 +3,12 @@ pedidos_online/app.py
 ─────────────────────────────────────────────
 FacturApp Pedidos Online — App Móvil Streamlit
 ─────────────────────────────────────────────
-Ejecución:
+Arquitectura multi-tenant: cada distribuidor tiene su URL única.
+Ejemplo: ?negocio=parada-tecnica-a3f8
+
+Ejecución local:
     cd pedidos_online
-    streamlit run app.py
+    streamlit run app.py -- --negocio=mi-negocio-xxxx
 
 Deploy (Streamlit Cloud):
     Subir esta carpeta a GitHub, conectar en share.streamlit.io
@@ -26,38 +29,46 @@ from catalogo import page_catalogo
 from pedido   import page_confirmacion, page_exito
 
 
+# ── Leer negocio_id desde la URL ─────────────────────────────────────────────
+# El negocio_id llega como parámetro de URL: ?negocio=parada-tecnica-a3f8
+# Se guarda en session_state para no perderlo entre reruns.
+# Si no está en la URL ni en la sesión → pantalla de error.
+
+if "negocio_id" not in st.session_state:
+    negocio_param = st.query_params.get("negocio", "")
+    st.session_state.negocio_id = negocio_param.strip()
+
+negocio_id = st.session_state.negocio_id
+
+if not negocio_id:
+    st.error(
+        "⚠️ **URL inválida.** Esta app requiere un código de negocio en la URL.\n\n"
+        "Pedile a tu proveedor el enlace correcto.\n\n"
+        "*Ejemplo: `https://tu-app.streamlit.app?negocio=mi-negocio-xxxx`*"
+    )
+    st.stop()
+
+
 # ── Inicializar sesión ────────────────────────────────────────────────────────
-# REGLA: usar siempre "if X not in st.session_state" para nunca pisar
-# valores ya existentes entre reruns. Esto es la única forma segura.
 
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
-# cliente es la única fuente de verdad del login.
-# Se setea en auth.py al verificar credenciales y se borra en logout.
-# Inicializarlo aquí como None evita KeyError en cualquier rerun.
 if "cliente" not in st.session_state:
     st.session_state.cliente = None
 
-# carrito: nunca inicializar con {} en cada render.
-# Solo se crea la clave si no existe, para no pisar un carrito activo.
 if "carrito" not in st.session_state:
     st.session_state.carrito = {}
 
 
 # ── Guardia de autenticación ──────────────────────────────────────────────────
-# Si el cliente no está en sesión y la página solicitada requiere auth,
-# redirigir a login. Previene que un rerun inesperado deje al usuario
-# en una página protegida sin datos.
 
 PAGINAS_PUBLICAS = {"login", "registro"}
 
 if st.session_state.cliente is None:
-    # Si la página actual NO es pública, forzar login
     if st.session_state.page not in PAGINAS_PUBLICAS:
         st.session_state.page = "login"
 else:
-    # Hay sesión activa: si está en login, redirigir al catálogo
     if st.session_state.page == "login":
         st.session_state.page = "catalogo"
 

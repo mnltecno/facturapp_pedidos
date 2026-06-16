@@ -130,11 +130,12 @@ def page_catalogo():
 
     cliente = st.session_state.get("cliente", {})
 
-    # ── Cargar catálogo (caché de sesión) ─────────────────────────────────────
+    # ── Cargar catálogo (caché de sesión, filtrado por negocio_id) ───────────
     # FIX: "if not in" garantiza que no se pisa la caché en reruns.
+    negocio_id = st.session_state.get("negocio_id", "")
     if "productos_cache" not in st.session_state:
         with st.spinner("Cargando catálogo..."):
-            st.session_state.productos_cache = get_productos()
+            st.session_state.productos_cache = get_productos(negocio_id)
             st.session_state.familias_cache  = sorted({
                 p["familia"] for p in st.session_state.productos_cache
                 if p.get("familia")

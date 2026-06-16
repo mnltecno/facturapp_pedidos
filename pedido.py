@@ -185,10 +185,12 @@ def page_confirmacion():
     if st.button("✅  Confirmar pedido", use_container_width=True, type="primary"):
         with st.spinner("Guardando pedido..."):
             try:
+                negocio_id = st.session_state.get("negocio_id", "")
                 pedido_id = guardar_pedido(
                     cliente_id=cliente["id"],
                     items=list(carrito.values()),
                     total=round(total, 2),
+                    negocio_id=negocio_id,
                 )
                 # FIX: resetear con la función correcta (usa tab_keys)
                 _resetear_cantidades_catalogo(list(carrito.keys()))
