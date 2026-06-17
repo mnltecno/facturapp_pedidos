@@ -135,10 +135,18 @@ def page_catalogo():
     negocio_id = st.session_state.get("negocio_id", "")
     if "productos_cache" not in st.session_state:
         with st.spinner("Cargando catálogo..."):
-            st.session_state.productos_cache = get_productos(negocio_id)
+            raw = get_productos(negocio_id)
+            # Deduplicar por ean13 — previene StreamlitDuplicateElementKey
+            # si la DB tiene filas repetidas por el mismo EAN.
+            seen: set = set()
+            unicos = []
+            for p in raw:
+                if p["ean13"] not in seen:
+                    seen.add(p["ean13"])
+                    unicos.append(p)
+            st.session_state.productos_cache = unicos
             st.session_state.familias_cache  = sorted({
-                p["familia"] for p in st.session_state.productos_cache
-                if p.get("familia")
+                p["familia"] for p in unicos if p.get("familia")
             })
 
     todos_prods = st.session_state.productos_cache
