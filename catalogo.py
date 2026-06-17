@@ -133,21 +133,28 @@ def page_catalogo():
     # ── Cargar catálogo (caché de sesión, filtrado por negocio_id) ───────────
     # FIX: "if not in" garantiza que no se pisa la caché en reruns.
     negocio_id = st.session_state.get("negocio_id", "")
-    if "productos_cache" not in st.session_state:
+    if not st.session_state.get("productos_cache"):
+        # Carga (o recarga) si el caché no existe O si está vacío.
+        # Esto evita que un error de red en la primera carga deje el catálogo
+        # bloqueado en vacío para toda la sesión.
         with st.spinner("Cargando catálogo..."):
             raw = get_productos(negocio_id)
             # Deduplicar por ean13 — previene StreamlitDuplicateElementKey
-            # si la DB tiene filas repetidas por el mismo EAN.
             seen: set = set()
             unicos = []
             for p in raw:
                 if p["ean13"] not in seen:
                     seen.add(p["ean13"])
                     unicos.append(p)
-            st.session_state.productos_cache = unicos
-            st.session_state.familias_cache  = sorted({
-                p["familia"] for p in unicos if p.get("familia")
-            })
+            if unicos:   # solo guardar en caché si hay productos reales
+                st.session_state.productos_cache = unicos
+                st.session_state.familias_cache  = sorted({
+                    p["familia"] for p in unicos if p.get("familia")
+                })
+            else:
+                st.warning("⚠️ No se encontraron productos para este negocio. "
+                           "Sincronizá el catálogo desde FacturApp Desktop.")
+                st.stop()
 
     todos_prods = st.session_state.productos_cache
     familias    = st.session_state.familias_cache
