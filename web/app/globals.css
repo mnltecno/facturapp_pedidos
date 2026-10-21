@@ -1,0 +1,176 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --papel: #f3f0e8;
+  --papel-hondo: #ebe6da;
+  --superficie: #fbfaf6;
+  --tinta: #17160f;
+  --tinta-2: #3a382e;
+  --gris: #625e52;
+  --gris-suave: #736f62;
+  --linea: rgb(23 22 15 / 0.09);
+  --linea-fuerte: rgb(23 22 15 / 0.16);
+  --sello: #b23a1c;
+  --sello-suave: #f6e1d6;
+  --pendiente: #8a5508;
+  --pendiente-suave: #f5e9cf;
+  --listo: #2d6a3e;
+  --listo-suave: #dcebdc;
+  --wa: #1d8a4c;
+  --curva-entrada: cubic-bezier(0.22, 1, 0.36, 1);
+  --curva-mover: cubic-bezier(0.25, 1, 0.5, 1);
+  --curva-cajon: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@theme inline {
+  --color-papel: var(--papel);
+  --color-papel-hondo: var(--papel-hondo);
+  --color-superficie: var(--superficie);
+  --color-tinta: var(--tinta);
+  --color-tinta-2: var(--tinta-2);
+  --color-gris: var(--gris);
+  --color-gris-suave: var(--gris-suave);
+  --color-linea: var(--linea);
+  --color-linea-fuerte: var(--linea-fuerte);
+  --color-sello: var(--sello);
+  --color-sello-suave: var(--sello-suave);
+  --color-pendiente: var(--pendiente);
+  --color-pendiente-suave: var(--pendiente-suave);
+  --color-listo: var(--listo);
+  --color-listo-suave: var(--listo-suave);
+  --color-wa: var(--wa);
+  --font-sans: var(--font-geist);
+  --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-instrument);
+  --ease-entrada: var(--curva-entrada);
+  --ease-mover: var(--curva-mover);
+  --ease-cajon: var(--curva-cajon);
+}
+
+html {
+  background: var(--papel);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  background: var(--papel);
+  color: var(--tinta);
+  font-family: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  overflow-x: clip;
+}
+
+/* Grano de papel: fijo y sin eventos, para no repintar al scrollear. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+::selection {
+  background: var(--tinta);
+  color: var(--papel);
+}
+
+:focus-visible {
+  outline: 2px solid var(--sello);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.cifra {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reveal al entrar en pantalla: sólo se oculta si hay JS, así el contenido
+   nunca queda invisible si el script no corre. */
+.js [data-reveal] {
+  opacity: 0;
+  transform: translateY(22px);
+  filter: blur(6px);
+  transition:
+    opacity 0.9s var(--curva-entrada),
+    transform 0.9s var(--curva-entrada),
+    filter 0.9s var(--curva-entrada);
+  transition-delay: var(--retraso, 0ms);
+}
+
+.js [data-reveal][data-visible="true"] {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+@keyframes subir {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+.entrada {
+  animation: subir 1s var(--curva-entrada) both;
+  animation-delay: var(--retraso, 0ms);
+}
+
+@keyframes flujo {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.trazo-flujo {
+  stroke-dasharray: 3 9;
+  animation: flujo 1.4s linear infinite;
+  animation-play-state: paused;
+}
+
+[data-visible="true"] .trazo-flujo {
+  animation-play-state: running;
+}
+
+.sin-barra {
+  scrollbar-width: none;
+}
+.sin-barra::-webkit-scrollbar {
+  display: none;
+}
+
+.pantalla-scroll {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--linea-fuerte) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .js [data-reveal] {
+    transform: none;
+    filter: none;
+    transition: opacity 0.3s ease;
+  }
+  .entrada {
+    animation: none;
+  }
+  .trazo-flujo {
+    animation: none;
+  }
+}
